@@ -937,18 +937,18 @@ app.get('/editor', async (req, res) => {
     
     function getScaledCanvas() {
       const scale = parseInt(document.getElementById('outputScale').value) || 1;
-      if (scale === 1) {
-        return canvas.toDataURL('image/png');
-      }
       
-      // Create scaled canvas
+      // Always create a fresh canvas to ensure proper transparency
       const scaledCanvas = document.createElement('canvas');
       scaledCanvas.width = canvas.width * scale;
       scaledCanvas.height = canvas.height * scale;
       const sctx = scaledCanvas.getContext('2d');
       
-      // Draw background if enabled
-      if (useBgColor) {
+      // Explicitly clear to transparent
+      sctx.clearRect(0, 0, scaledCanvas.width, scaledCanvas.height);
+      
+      // Draw background ONLY if checkbox is checked
+      if (useBgColor && document.getElementById('bgToggle').checked) {
         sctx.fillStyle = bgColor;
         sctx.fillRect(0, 0, scaledCanvas.width, scaledCanvas.height);
       }
@@ -1362,13 +1362,13 @@ app.post('/save-editor', async (req, res) => {
       const canvas = createCanvas(width, height);
       const ctx = canvas.getContext('2d');
       
-      // Draw image frame
+      // Draw image frame (transparent areas will be handled by GIF encoder)
       const imageData2 = ctx.createImageData(width, height);
       imageData2.data.set(rawBuffer);
       ctx.putImageData(imageData2, 0, 0);
       encoder.addFrame(ctx);
       
-      // Transparent frame
+      // Fully transparent frame
       ctx.clearRect(0, 0, width, height);
       encoder.setDelay(100);
       encoder.addFrame(ctx);
