@@ -851,6 +851,22 @@ app.get('/editor', async (req, res) => {
       <div class="section">
         <h3>Save as New Image</h3>
         <input type="text" id="outputName" placeholder="proto-image">
+        
+        <label>Output Resolution</label>
+        <div class="row" style="margin-bottom:10px;">
+          <div>
+            <select id="outputScale" onchange="updateOutputSize()">
+              <option value="1">1x (current)</option>
+              <option value="2" selected>2x</option>
+              <option value="3">3x</option>
+              <option value="4">4x</option>
+            </select>
+          </div>
+          <div>
+            <input type="text" id="outputSizeDisplay" readonly style="background:#222; color:#4ecdc4; text-align:center;">
+          </div>
+        </div>
+        
         <button onclick="saveImage()">💾 Save as PNG</button>
         <button class="btn-gif" onclick="saveAsGif()">🎬 Save as GIF</button>
         <div id="gifOptions" style="display:none; margin-top:8px;">
@@ -902,6 +918,7 @@ app.get('/editor', async (req, res) => {
       document.getElementById('canvasW').value = w;
       document.getElementById('canvasH').value = h;
       updateCanvasDisplay();
+      updateOutputSize();
       draw();
     }
     
@@ -909,6 +926,45 @@ app.get('/editor', async (req, res) => {
       const w = parseInt(document.getElementById('canvasW').value) || 1080;
       const h = parseInt(document.getElementById('canvasH').value) || 1920;
       setCanvasSize(w, h);
+    }
+    
+    function updateOutputSize() {
+      const scale = parseInt(document.getElementById('outputScale').value) || 1;
+      const w = canvas.width * scale;
+      const h = canvas.height * scale;
+      document.getElementById('outputSizeDisplay').value = w + '×' + h;
+    }
+    
+    function getScaledCanvas() {
+      const scale = parseInt(document.getElementById('outputScale').value) || 1;
+      if (scale === 1) {
+        return canvas.toDataURL('image/png');
+      }
+      
+      // Create scaled canvas
+      const scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = canvas.width * scale;
+      scaledCanvas.height = canvas.height * scale;
+      const sctx = scaledCanvas.getContext('2d');
+      
+      // Draw background if enabled
+      if (useBgColor) {
+        sctx.fillStyle = bgColor;
+        sctx.fillRect(0, 0, scaledCanvas.width, scaledCanvas.height);
+      }
+      
+      // Draw all layers at scaled size
+      layers.forEach(layer => {
+        if (layer.img && layer.img.complete) {
+          const w = layer.originalW * layer.scale * scale;
+          const h = layer.originalH * layer.scale * scale;
+          const x = layer.x * scale;
+          const y = layer.y * scale;
+          sctx.drawImage(layer.img, x, y, w, h);
+        }
+      });
+      
+      return scaledCanvas.toDataURL('image/png');
     }
     
     function toggleBg() {
@@ -1163,7 +1219,7 @@ app.get('/editor', async (req, res) => {
       selectedIndex = -1;
       draw();
       
-      const dataUrl = canvas.toDataURL('image/png');
+      const dataUrl = getScaledCanvas();
       selectedIndex = oldSelected;
       draw();
       
@@ -1194,7 +1250,7 @@ app.get('/editor', async (req, res) => {
       selectedIndex = -1;
       draw();
       
-      const dataUrl = canvas.toDataURL('image/png');
+      const dataUrl = getScaledCanvas();
       selectedIndex = oldSelected;
       draw();
       
@@ -1219,7 +1275,7 @@ app.get('/editor', async (req, res) => {
       const oldSelected = selectedIndex;
       selectedIndex = -1;
       draw();
-      const dataUrl = canvas.toDataURL('image/png');
+      const dataUrl = getScaledCanvas();
       selectedIndex = oldSelected;
       draw();
       
@@ -1245,7 +1301,7 @@ app.get('/editor', async (req, res) => {
       const oldSelected = selectedIndex;
       selectedIndex = -1;
       draw();
-      const dataUrl = canvas.toDataURL('image/png');
+      const dataUrl = getScaledCanvas();
       selectedIndex = oldSelected;
       draw();
       
@@ -1263,6 +1319,7 @@ app.get('/editor', async (req, res) => {
     }
     
     updateCanvasDisplay();
+    updateOutputSize();
     window.addEventListener('resize', updateCanvasDisplay);
     ${sourceImage ? "document.getElementById('imageSelect').value = '" + sourceImage + "'; addLayer();" : ''}
   </script>
