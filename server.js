@@ -742,7 +742,7 @@ app.get('/editor', async (req, res) => {
       <h3>Select Image</h3>
       <select id="imageSelect" onchange="loadImage()">
         <option value="">-- Select image --</option>
-        ${images.map(img => \`<option value="\${img.filename}" \${img.filename === sourceImage ? 'selected' : ''}>\${img.filename}</option>\`).join('')}
+        ${images.map(img => '<option value="' + img.filename + '"' + (img.filename === sourceImage ? ' selected' : '') + '>' + img.filename + '</option>').join('')}
       </select>
       
       <h3>Position</h3>
@@ -1093,14 +1093,14 @@ app.post('/save-editor', async (req, res) => {
     
     // Save to database
     await pool.query(
-      \`INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3)
-       ON CONFLICT (filename) DO UPDATE SET mimetype = $2, data = $3\`,
+      `INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3)
+       ON CONFLICT (filename) DO UPDATE SET mimetype = $2, data = $3`,
       [finalFilename, finalMimetype, buffer]
     );
     
     res.json({ 
       success: true, 
-      url: \`\${req.protocol}://\${req.get('host')}/\${finalFilename}\`
+      url: req.protocol + '://' + req.get('host') + '/' + finalFilename
     });
   } catch (err) {
     console.error('Error saving editor image:', err);
