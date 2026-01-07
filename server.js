@@ -635,13 +635,15 @@ app.get('/editor', async (req, res) => {
     }
     .canvas-wrapper {
       position: relative;
-      background: #000;
+      background: repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 20px 20px;
       box-shadow: 0 0 50px rgba(78, 205, 196, 0.2);
       border: 2px solid #333;
     }
     #canvas {
       display: block;
     }
+    .bg-toggle { margin-bottom: 15px; }
+    .bg-toggle label { display: inline; margin-left: 8px; cursor: pointer; }
     h2 { color: #4ecdc4; font-size: 16px; margin-bottom: 15px; }
     h3 { color: #888; font-size: 13px; margin: 20px 0 10px; text-transform: uppercase; }
     label {
@@ -730,6 +732,15 @@ app.get('/editor', async (req, res) => {
   <div class="editor-container">
     <div class="sidebar">
       <h2>🎯 Proto M Editor</h2>
+      
+      <h3>Background</h3>
+      <div class="bg-toggle">
+        <input type="checkbox" id="bgToggle" onchange="toggleBg()">
+        <label for="bgToggle">Add background color</label>
+      </div>
+      <div id="bgColorPicker" style="display:none; margin-bottom:15px;">
+        <input type="color" id="bgColorInput" value="#000000" onchange="updateBgColor()" style="width:100%; height:40px; border:none; cursor:pointer;">
+      </div>
       
       <h3>Canvas Size</h3>
       <div class="presets">
@@ -857,10 +868,27 @@ app.get('/editor', async (req, res) => {
       img.src = '/' + filename + '?t=' + Date.now();
     }
     
+    let useBgColor = false;
+    let bgColor = '#000000';
+    
+    function toggleBg() {
+      useBgColor = document.getElementById('bgToggle').checked;
+      document.getElementById('bgColorPicker').style.display = useBgColor ? 'block' : 'none';
+      draw();
+    }
+    
+    function updateBgColor() {
+      bgColor = document.getElementById('bgColorInput').value;
+      draw();
+    }
+    
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      if (useBgColor) {
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       
       if (img && img.complete) {
         const w = originalW * imgScale;
