@@ -1340,20 +1340,28 @@ app.get('/links', async (req, res) => {
   
   ${links.map(link => {
     const fullUrl = baseUrl + '/' + link.slug;
+    const imgPreview = link.image_filename 
+      ? '<img src="/' + link.image_filename + '?t=' + Date.now() + '" alt="preview">' 
+      : '';
+    const imgOptions = images.map(img => {
+      const sel = img.filename === link.image_filename ? ' selected' : '';
+      return '<option value="' + img.filename + '"' + sel + '>' + img.filename + '</option>';
+    }).join('');
+    
     return '<div class="link-item">' +
       '<div class="link-header">' +
         '<span class="link-slug">/' + link.slug + '</span>' +
-        '<button class="btn-small btn-delete" onclick="deleteLink(\\'' + link.slug + '\\')">Delete</button>' +
+        '<button class="btn-small btn-delete" onclick="deleteLink(&quot;' + link.slug + '&quot;)">Delete</button>' +
       '</div>' +
       '<div class="link-url">' + fullUrl + '</div>' +
       '<div class="link-preview">' +
-        (link.image_filename ? '<img src="/' + link.image_filename + '?t=' + Date.now() + '" alt="preview">' : '<img src="" alt="no image" style="display:none">') +
+        imgPreview +
         '<div class="link-controls">' +
-          '<select onchange="updateLink(\\'' + link.slug + '\\', this.value)">' +
+          '<select onchange="updateLink(&quot;' + link.slug + '&quot;, this.value)">' +
             '<option value="">-- No image --</option>' +
-            images.map(img => '<option value="' + img.filename + '"' + (img.filename === link.image_filename ? ' selected' : '') + '>' + img.filename + '</option>').join('') +
+            imgOptions +
           '</select>' +
-          '<button class="btn-small btn-copy" onclick="copyUrl(\\'' + fullUrl + '\\')">Copy URL</button>' +
+          '<button class="btn-small btn-copy" onclick="copyUrl(&quot;' + fullUrl + '&quot;)">Copy URL</button>' +
         '</div>' +
       '</div>' +
     '</div>';
