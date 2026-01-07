@@ -53,10 +53,13 @@ const upload = multer({
   }
 });
 
+// Parse JSON for editor
+app.use(express.json({ limit: '10mb' }));
+
 // Serve images from database
 app.get('/:filename', async (req, res, next) => {
   // Skip if it looks like a route
-  if (['upload', 'edit', 'delete', 'favicon.ico', 'gif', 'create-gif'].includes(req.params.filename)) {
+  if (['upload', 'edit', 'delete', 'favicon.ico', 'gif', 'create-gif', 'editor', 'save-editor'].includes(req.params.filename)) {
     return next();
   }
   
@@ -218,6 +221,7 @@ app.get('/', async (req, res) => {
   <div class="nav">
     <a href="/">📷 Upload</a>
     <a href="/gif">🎬 GIF Creator</a>
+    <a href="/editor">🎯 Editor</a>
   </div>
   
   <h1>🖼️ Image Hosting</h1>
@@ -267,6 +271,7 @@ app.get('/', async (req, res) => {
             <button class="btn-small copy-btn" onclick="copyUrl('${img.filename}')">Copy URL</button>
             <a class="btn btn-small edit-btn" href="/edit/${encodeURIComponent(img.filename)}">Edit / Resize</a>
             <a class="btn btn-small gif-btn" href="/gif?source=${encodeURIComponent(img.filename)}">Make GIF</a>
+            <a class="btn btn-small" style="background:#aa8844" href="/editor?source=${encodeURIComponent(img.filename)}">Editor</a>
             <button class="btn-small delete-btn" onclick="deleteImg('${img.filename}')">Delete</button>
           </div>
         </div>
@@ -331,6 +336,7 @@ app.get('/gif', async (req, res) => {
   <div class="nav">
     <a href="/">📷 Upload</a>
     <a href="/gif">🎬 GIF Creator</a>
+    <a href="/editor">🎯 Editor</a>
   </div>
   
   <h1>🎬 GIF Creator</h1>
@@ -575,6 +581,530 @@ app.post('/create-gif', upload.single('image'), async (req, res) => {
   } catch (err) {
     console.error('Error creating GIF:', err);
     res.status(500).send('Error creating GIF: ' + err.message);
+  }
+});
+
+// Editor page - position and resize images for Proto M
+app.get('/editor', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT filename FROM images ORDER BY created_at DESC'
+    );
+    const images = result.rows;
+    const sourceImage = req.query.source || '';
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Proto M Editor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    .nav { 
+      padding: 15px 20px; 
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+    }
+    .nav a { color: #4ecdc4; margin-right: 20px; text-decoration: none; }
+    .editor-container {
+      display: flex;
+      height: calc(100vh - 60px);
+    }
+    .sidebar {
+      width: 300px;
+      background: #1a1a1a;
+      padding: 20px;
+      overflow-y: auto;
+      border-right: 1px solid #333;
+    }
+    .canvas-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0a;
+      padding: 20px;
+      overflow: auto;
+    }
+    .canvas-wrapper {
+      position: relative;
+      background: #000;
+      box-shadow: 0 0 50px rgba(78, 205, 196, 0.2);
+      border: 2px solid #333;
+    }
+    #canvas {
+      display: block;
+    }
+    h2 { color: #4ecdc4; font-size: 16px; margin-bottom: 15px; }
+    h3 { color: #888; font-size: 13px; margin: 20px 0 10px; text-transform: uppercase; }
+    label {
+      display: block;
+      color: #aaa;
+      font-size: 13px;
+      margin-bottom: 5px;
+    }
+    select, input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+    }
+    .row > div { flex: 1; }
+    input[type="range"] {
+      width: 100%;
+      margin: 10px 0;
+    }
+    .slider-value {
+      text-align: center;
+      color: #4ecdc4;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #4ecdc4;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    button:hover { background: #3dbdb5; }
+    .btn-secondary {
+      background: #555;
+      color: #fff;
+    }
+    .btn-gif {
+      background: #cc55aa;
+    }
+    .presets {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+    .preset-btn {
+      padding: 8px;
+      font-size: 12px;
+    }
+    .info {
+      color: #666;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+    .coord-display {
+      background: #2a2a2a;
+      padding: 10px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      margin-bottom: 15px;
+    }
+    .coord-display span { color: #4ecdc4; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">📷 Upload</a>
+    <a href="/gif">🎬 GIF Creator</a>
+    <a href="/editor">🎯 Editor</a>
+  </div>
+  
+  <div class="editor-container">
+    <div class="sidebar">
+      <h2>🎯 Proto M Editor</h2>
+      
+      <h3>Canvas Size</h3>
+      <div class="presets">
+        <button class="preset-btn" onclick="setCanvasSize(1080, 1920)">1080×1920</button>
+        <button class="preset-btn" onclick="setCanvasSize(2160, 3840)">2160×3840</button>
+        <button class="preset-btn" onclick="setCanvasSize(540, 960)">540×960</button>
+        <button class="preset-btn btn-secondary" onclick="setCanvasSize(1920, 1080)">1920×1080</button>
+      </div>
+      
+      <h3>Select Image</h3>
+      <select id="imageSelect" onchange="loadImage()">
+        <option value="">-- Select image --</option>
+        ${images.map(img => \`<option value="\${img.filename}" \${img.filename === sourceImage ? 'selected' : ''}>\${img.filename}</option>\`).join('')}
+      </select>
+      
+      <h3>Position</h3>
+      <div class="coord-display">
+        X: <span id="posX">0</span> | Y: <span id="posY">0</span> | 
+        W: <span id="imgW">0</span> × H: <span id="imgH">0</span>
+      </div>
+      
+      <div class="row">
+        <div>
+          <label>X Position</label>
+          <input type="number" id="inputX" value="0" onchange="updateFromInputs()">
+        </div>
+        <div>
+          <label>Y Position</label>
+          <input type="number" id="inputY" value="0" onchange="updateFromInputs()">
+        </div>
+      </div>
+      
+      <h3>Scale</h3>
+      <input type="range" id="scaleSlider" min="10" max="300" value="100" oninput="updateScale()">
+      <div class="slider-value"><span id="scaleValue">100</span>%</div>
+      
+      <div class="row">
+        <div>
+          <label>Width</label>
+          <input type="number" id="inputW" value="0" onchange="updateFromSize()">
+        </div>
+        <div>
+          <label>Height</label>
+          <input type="number" id="inputH" value="0" onchange="updateFromSize()">
+        </div>
+      </div>
+      
+      <h3>Quick Position</h3>
+      <div class="presets">
+        <button class="preset-btn btn-secondary" onclick="positionPreset('tl')">↖ Top-Left</button>
+        <button class="preset-btn btn-secondary" onclick="positionPreset('tr')">↗ Top-Right</button>
+        <button class="preset-btn btn-secondary" onclick="positionPreset('center')">⊙ Center</button>
+        <button class="preset-btn btn-secondary" onclick="positionPreset('fit')">⊡ Fit</button>
+        <button class="preset-btn btn-secondary" onclick="positionPreset('bl')">↙ Bottom-Left</button>
+        <button class="preset-btn btn-secondary" onclick="positionPreset('br')">↘ Bottom-Right</button>
+      </div>
+      
+      <h3>Save</h3>
+      <label>Output Filename</label>
+      <input type="text" id="outputName" placeholder="proto-image">
+      
+      <button onclick="saveImage()">💾 Save as PNG</button>
+      <button class="btn-gif" onclick="saveAsGif()">🎬 Save as GIF (show then hide)</button>
+      
+      <div id="gifOptions" style="display:none; margin-top:10px;">
+        <label>Show Duration (seconds)</label>
+        <input type="number" id="gifDuration" value="3" min="0.5" max="30" step="0.5">
+      </div>
+      
+      <p class="info">Drag the image to move it. Use scroll or slider to resize.</p>
+    </div>
+    
+    <div class="canvas-area">
+      <div class="canvas-wrapper">
+        <canvas id="canvas" width="1080" height="1920"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    let img = null;
+    let imgX = 0, imgY = 0;
+    let imgScale = 1;
+    let originalW = 0, originalH = 0;
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
+    
+    // Scale canvas display for screen
+    function updateCanvasDisplay() {
+      const maxH = window.innerHeight - 100;
+      const scale = Math.min(1, maxH / canvas.height, 600 / canvas.width);
+      canvas.style.width = (canvas.width * scale) + 'px';
+      canvas.style.height = (canvas.height * scale) + 'px';
+    }
+    
+    function setCanvasSize(w, h) {
+      canvas.width = w;
+      canvas.height = h;
+      updateCanvasDisplay();
+      draw();
+    }
+    
+    function loadImage() {
+      const filename = document.getElementById('imageSelect').value;
+      if (!filename) return;
+      
+      img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function() {
+        originalW = img.width;
+        originalH = img.height;
+        imgScale = 1;
+        
+        // Center image
+        imgX = (canvas.width - originalW) / 2;
+        imgY = (canvas.height - originalH) / 2;
+        
+        document.getElementById('scaleSlider').value = 100;
+        updateDisplay();
+        draw();
+      };
+      img.src = '/' + filename + '?t=' + Date.now();
+    }
+    
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      if (img && img.complete) {
+        const w = originalW * imgScale;
+        const h = originalH * imgScale;
+        ctx.drawImage(img, imgX, imgY, w, h);
+      }
+    }
+    
+    function updateDisplay() {
+      const w = Math.round(originalW * imgScale);
+      const h = Math.round(originalH * imgScale);
+      
+      document.getElementById('posX').textContent = Math.round(imgX);
+      document.getElementById('posY').textContent = Math.round(imgY);
+      document.getElementById('imgW').textContent = w;
+      document.getElementById('imgH').textContent = h;
+      
+      document.getElementById('inputX').value = Math.round(imgX);
+      document.getElementById('inputY').value = Math.round(imgY);
+      document.getElementById('inputW').value = w;
+      document.getElementById('inputH').value = h;
+      document.getElementById('scaleValue').textContent = Math.round(imgScale * 100);
+    }
+    
+    function updateFromInputs() {
+      imgX = parseInt(document.getElementById('inputX').value) || 0;
+      imgY = parseInt(document.getElementById('inputY').value) || 0;
+      updateDisplay();
+      draw();
+    }
+    
+    function updateFromSize() {
+      const newW = parseInt(document.getElementById('inputW').value) || originalW;
+      if (originalW > 0) {
+        imgScale = newW / originalW;
+        document.getElementById('scaleSlider').value = imgScale * 100;
+      }
+      updateDisplay();
+      draw();
+    }
+    
+    function updateScale() {
+      imgScale = document.getElementById('scaleSlider').value / 100;
+      updateDisplay();
+      draw();
+    }
+    
+    function positionPreset(preset) {
+      if (!img) return;
+      const w = originalW * imgScale;
+      const h = originalH * imgScale;
+      
+      switch(preset) {
+        case 'tl': imgX = 0; imgY = 0; break;
+        case 'tr': imgX = canvas.width - w; imgY = 0; break;
+        case 'bl': imgX = 0; imgY = canvas.height - h; break;
+        case 'br': imgX = canvas.width - w; imgY = canvas.height - h; break;
+        case 'center': imgX = (canvas.width - w) / 2; imgY = (canvas.height - h) / 2; break;
+        case 'fit':
+          const fitScale = Math.min(canvas.width / originalW, canvas.height / originalH);
+          imgScale = fitScale;
+          document.getElementById('scaleSlider').value = fitScale * 100;
+          imgX = (canvas.width - originalW * fitScale) / 2;
+          imgY = (canvas.height - originalH * fitScale) / 2;
+          break;
+      }
+      updateDisplay();
+      draw();
+    }
+    
+    // Mouse drag
+    canvas.addEventListener('mousedown', (e) => {
+      if (!img) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
+      
+      isDragging = true;
+      dragStartX = x - imgX;
+      dragStartY = y - imgY;
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
+      
+      imgX = x - dragStartX;
+      imgY = y - dragStartY;
+      updateDisplay();
+      draw();
+    });
+    
+    canvas.addEventListener('mouseup', () => isDragging = false);
+    canvas.addEventListener('mouseleave', () => isDragging = false);
+    
+    // Scroll to resize
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.95 : 1.05;
+      imgScale *= delta;
+      imgScale = Math.max(0.1, Math.min(5, imgScale));
+      document.getElementById('scaleSlider').value = imgScale * 100;
+      updateDisplay();
+      draw();
+    });
+    
+    async function saveImage() {
+      const name = document.getElementById('outputName').value || 'proto-image';
+      const dataUrl = canvas.toDataURL('image/png');
+      
+      const response = await fetch('/save-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          imageData: dataUrl, 
+          filename: name + '.png',
+          mimetype: 'image/png'
+        })
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        alert('Saved! URL: ' + result.url);
+        window.open(result.url, '_blank');
+      } else {
+        alert('Error: ' + result.error);
+      }
+    }
+    
+    function saveAsGif() {
+      const opts = document.getElementById('gifOptions');
+      opts.style.display = opts.style.display === 'none' ? 'block' : 'none';
+      if (opts.style.display === 'block') {
+        document.querySelector('.btn-gif').textContent = '✓ Create GIF Now';
+        document.querySelector('.btn-gif').onclick = doSaveGif;
+      }
+    }
+    
+    async function doSaveGif() {
+      const name = document.getElementById('outputName').value || 'proto-animation';
+      const duration = document.getElementById('gifDuration').value || 3;
+      const dataUrl = canvas.toDataURL('image/png');
+      
+      const response = await fetch('/save-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          imageData: dataUrl, 
+          filename: name + '.gif',
+          mimetype: 'image/gif',
+          createGif: true,
+          duration: parseFloat(duration)
+        })
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        alert('GIF Created! URL: ' + result.url);
+        window.open(result.url, '_blank');
+      } else {
+        alert('Error: ' + result.error);
+      }
+    }
+    
+    // Init
+    updateCanvasDisplay();
+    window.addEventListener('resize', updateCanvasDisplay);
+    ${sourceImage ? "document.getElementById('imageSelect').value = '" + sourceImage + "'; loadImage();" : ''}
+  </script>
+</body>
+</html>
+    `);
+  } catch (err) {
+    console.error('Error loading editor:', err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Save editor output
+app.post('/save-editor', async (req, res) => {
+  try {
+    const { imageData, filename, mimetype, createGif, duration } = req.body;
+    
+    // Convert base64 to buffer
+    const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+    let buffer = Buffer.from(base64Data, 'base64');
+    
+    let finalFilename = filename;
+    let finalMimetype = mimetype;
+    
+    if (createGif) {
+      // Create GIF from the image
+      const metadata = await sharp(buffer).metadata();
+      const width = metadata.width;
+      const height = metadata.height;
+      
+      const rawBuffer = await sharp(buffer).ensureAlpha().raw().toBuffer();
+      
+      const encoder = new GIFEncoder(width, height, 'neuquant', true);
+      encoder.setRepeat(-1); // No repeat
+      encoder.setDelay(duration * 1000);
+      encoder.setQuality(10);
+      
+      encoder.start();
+      
+      const canvas = createCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      
+      // Draw image frame
+      const imageData2 = ctx.createImageData(width, height);
+      imageData2.data.set(rawBuffer);
+      ctx.putImageData(imageData2, 0, 0);
+      encoder.addFrame(ctx);
+      
+      // Transparent frame
+      ctx.clearRect(0, 0, width, height);
+      encoder.setDelay(100);
+      encoder.addFrame(ctx);
+      
+      encoder.finish();
+      buffer = encoder.out.getData();
+      finalMimetype = 'image/gif';
+    }
+    
+    // Save to database
+    await pool.query(
+      \`INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3)
+       ON CONFLICT (filename) DO UPDATE SET mimetype = $2, data = $3\`,
+      [finalFilename, finalMimetype, buffer]
+    );
+    
+    res.json({ 
+      success: true, 
+      url: \`\${req.protocol}://\${req.get('host')}/\${finalFilename}\`
+    });
+  } catch (err) {
+    console.error('Error saving editor image:', err);
+    res.json({ success: false, error: err.message });
   }
 });
 
