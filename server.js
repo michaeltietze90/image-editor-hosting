@@ -767,8 +767,22 @@ app.get('/editor', async (req, res) => {
       <h3>Canvas</h3>
       <div class="presets">
         <button class="preset-btn" onclick="setCanvasSize(1080, 1920)">1080×1920</button>
+        <button class="preset-btn" onclick="setCanvasSize(2160, 3840)">2160×3840</button>
         <button class="preset-btn" onclick="setCanvasSize(540, 960)">540×960</button>
         <button class="preset-btn btn-secondary" onclick="setCanvasSize(1920, 1080)">1920×1080</button>
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <div>
+          <label>Width</label>
+          <input type="number" id="canvasW" value="1080" min="100" max="8000">
+        </div>
+        <div>
+          <label>Height</label>
+          <input type="number" id="canvasH" value="1920" min="100" max="8000">
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button class="btn-secondary" onclick="applyCanvasSize()" style="margin-bottom:10px;">Apply</button>
+        </div>
       </div>
       <div class="bg-toggle">
         <input type="checkbox" id="bgToggle" onchange="toggleBg()">
@@ -885,8 +899,16 @@ app.get('/editor', async (req, res) => {
     function setCanvasSize(w, h) {
       canvas.width = w;
       canvas.height = h;
+      document.getElementById('canvasW').value = w;
+      document.getElementById('canvasH').value = h;
       updateCanvasDisplay();
       draw();
+    }
+    
+    function applyCanvasSize() {
+      const w = parseInt(document.getElementById('canvasW').value) || 1080;
+      const h = parseInt(document.getElementById('canvasH').value) || 1920;
+      setCanvasSize(w, h);
     }
     
     function toggleBg() {
