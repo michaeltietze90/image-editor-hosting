@@ -256,6 +256,7 @@ app.get('/', async (req, res) => {
 <body>
   <div class="nav">
     <a href="/">📷 Upload</a>
+    <a href="/transparent">🔲 Transparent</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
     <a href="/links">🔗 Static Links</a>
@@ -337,6 +338,115 @@ app.get('/', async (req, res) => {
   }
 });
 
+// Create transparent/empty PNG
+app.get('/transparent', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Create Transparent PNG</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>${commonStyles}</style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">📷 Upload</a>
+    <a href="/transparent">🔲 Transparent</a>
+    <a href="/gif">🎬 GIF Creator</a>
+    <a href="/editor">🎯 Editor</a>
+    <a href="/links">🔗 Static Links</a>
+  </div>
+  
+  <h1>🔲 Create Transparent PNG</h1>
+  <p style="color:#888">Generate an empty transparent PNG to use as a placeholder or to clear fields.</p>
+  
+  <form action="/create-transparent" method="post">
+    <label>Filename (without extension):</label>
+    <input type="text" name="filename" value="clear" required>
+    
+    <label>Width (px):</label>
+    <input type="number" name="width" value="1080" min="1" max="4000">
+    
+    <label>Height (px):</label>
+    <input type="number" name="height" value="1920" min="1" max="4000">
+    
+    <button type="submit">Create Transparent PNG</button>
+  </form>
+</body>
+</html>
+  `);
+});
+
+app.post('/create-transparent', async (req, res) => {
+  try {
+    const filename = (req.body.filename || 'clear').replace(/[^a-zA-Z0-9_-]/g, '') + '.png';
+    const width = parseInt(req.body.width) || 1080;
+    const height = parseInt(req.body.height) || 1920;
+    
+    // Create transparent PNG using sharp
+    const transparentPng = await sharp({
+      create: {
+        width: width,
+        height: height,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      }
+    }).png().toBuffer();
+    
+    // Save to database
+    await pool.query(
+      `INSERT INTO images (filename, mimetype, data, created_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (filename) DO UPDATE SET data = $3, mimetype = $2, created_at = NOW()`,
+      [filename, 'image/png', transparentPng]
+    );
+    
+    const appUrl = process.env.HEROKU_APP_URL || `https://${req.headers.host}`;
+    
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Transparent PNG Created</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>${commonStyles}
+    .success { background: #1a3d1a; border: 1px solid #2d5a2d; padding: 20px; border-radius: 12px; margin: 20px 0; }
+    .preview { background: repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 20px 20px; padding: 20px; border-radius: 8px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">📷 Upload</a>
+    <a href="/transparent">🔲 Transparent</a>
+    <a href="/gif">🎬 GIF Creator</a>
+    <a href="/editor">🎯 Editor</a>
+    <a href="/links">🔗 Static Links</a>
+  </div>
+  
+  <h1>✅ Transparent PNG Created!</h1>
+  
+  <div class="success">
+    <p><strong>Filename:</strong> ${filename}</p>
+    <p><strong>Size:</strong> ${width} × ${height}px</p>
+    <p><strong>URL:</strong> <a href="${appUrl}/${filename}" target="_blank">${appUrl}/${filename}</a></p>
+    <button onclick="navigator.clipboard.writeText('${appUrl}/${filename}'); this.textContent='Copied!'">📋 Copy URL</button>
+  </div>
+  
+  <div class="preview">
+    <p style="color:#888; margin:0;">Preview (checkerboard = transparent):</p>
+    <img src="/${filename}" style="max-width:200px; max-height:200px; border:1px dashed #555;">
+  </div>
+  
+  <p><a href="/transparent">← Create another</a> | <a href="/">← Back to Upload</a></p>
+</body>
+</html>
+    `);
+  } catch (err) {
+    console.error('Error creating transparent PNG:', err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 // GIF Creator page
 app.get('/gif', async (req, res) => {
   try {
@@ -372,6 +482,7 @@ app.get('/gif', async (req, res) => {
 <body>
   <div class="nav">
     <a href="/">📷 Upload</a>
+    <a href="/transparent">🔲 Transparent</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
     <a href="/links">🔗 Static Links</a>
@@ -768,6 +879,7 @@ app.get('/editor', async (req, res) => {
 <body>
   <div class="nav">
     <a href="/">📷 Upload</a>
+    <a href="/transparent">🔲 Transparent</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
     <a href="/links">🔗 Static Links</a>
@@ -1567,6 +1679,7 @@ app.get('/links', async (req, res) => {
 <body>
   <div class="nav">
     <a href="/">📷 Upload</a>
+    <a href="/transparent">🔲 Transparent</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
     <a href="/links">🔗 Static Links</a>
