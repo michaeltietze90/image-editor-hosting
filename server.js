@@ -1,8 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const sharp = require('sharp');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,43 +10,83 @@ const PORT = process.env.PORT || 3000;
 // Parse URL-encoded bodies for edit form
 app.use(express.urlencoded({ extended: true }));
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+// Database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
-// Use memory storage so we can process with sharp before saving
+// Initialize database table
+async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS images (
+        id SERIAL PRIMARY KEY,
+        filename VARCHAR(255) UNIQUE NOT NULL,
+        mimetype VARCHAR(100) NOT NULL,
+        data BYTEA NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Database initialized');
+  } catch (err) {
+    console.error('Database init error:', err);
+  }
+}
+initDB();
+
+// Use memory storage for multer
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp|svg/;
+    const allowed = /jpeg|jpg|png|gif|webp/;
     const ext = allowed.test(path.extname(file.originalname).toLowerCase());
     const mime = allowed.test(file.mimetype);
     if (ext && mime) {
       cb(null, true);
     } else {
-      cb(new Error('Only images allowed'));
+      cb(new Error('Only images allowed (jpg, png, gif, webp)'));
     }
   }
 });
 
-// Serve uploaded images directly at root level: /imagename.png
-app.use(express.static(uploadsDir));
+// Serve images from database
+app.get('/:filename', async (req, res, next) => {
+  // Skip if it looks like a route
+  if (['upload', 'edit', 'delete', 'favicon.ico'].includes(req.params.filename)) {
+    return next();
+  }
+  
+  try {
+    const result = await pool.query(
+      'SELECT data, mimetype FROM images WHERE filename = $1',
+      [req.params.filename]
+    );
+    
+    if (result.rows.length === 0) {
+      return next(); // Let it fall through to 404
+    }
+    
+    const image = result.rows[0];
+    res.set('Content-Type', image.mimetype);
+    res.set('Cache-Control', 'public, max-age=31536000');
+    res.send(image.data);
+  } catch (err) {
+    console.error('Error serving image:', err);
+    next(err);
+  }
+});
 
 // Upload page
-app.get('/', (req, res) => {
-  // List existing images with metadata
-  const images = fs.readdirSync(uploadsDir)
-    .filter(f => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(f))
-    .map(f => {
-      const filepath = path.join(uploadsDir, f);
-      const stats = fs.statSync(filepath);
-      return { name: f, size: stats.size };
-    });
+app.get('/', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT filename, LENGTH(data) as size FROM images ORDER BY created_at DESC'
+    );
+    const images = result.rows;
 
-  res.send(`
+    res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -215,15 +255,15 @@ app.get('/', (req, res) => {
     ${images.length === 0 ? '<p style="color:#666">No images uploaded yet</p>' : ''}
     ${images.map(img => `
       <div class="image-item">
-        <img src="/${img.name}?t=${Date.now()}" alt="${img.name}">
+        <img src="/${img.filename}?t=${Date.now()}" alt="${img.filename}">
         <div class="image-info">
-          <strong>${img.name}</strong>
+          <strong>${img.filename}</strong>
           <span class="size-info">${(img.size / 1024).toFixed(1)} KB</span>
-          <div class="url-box" id="url-${img.name}">${req.protocol}://${req.get('host')}/${img.name}</div>
+          <div class="url-box" id="url-${img.filename}">${req.protocol}://${req.get('host')}/${img.filename}</div>
           <div class="btn-group">
-            <button class="btn-small copy-btn" onclick="copyUrl('${img.name}')">Copy URL</button>
-            <a class="btn btn-small edit-btn" href="/edit/${encodeURIComponent(img.name)}">Edit / Resize</a>
-            <button class="btn-small delete-btn" onclick="deleteImg('${img.name}')">Delete</button>
+            <button class="btn-small copy-btn" onclick="copyUrl('${img.filename}')">Copy URL</button>
+            <a class="btn btn-small edit-btn" href="/edit/${encodeURIComponent(img.filename)}">Edit / Resize</a>
+            <button class="btn-small delete-btn" onclick="deleteImg('${img.filename}')">Delete</button>
           </div>
         </div>
       </div>
@@ -244,31 +284,40 @@ app.get('/', (req, res) => {
   </script>
 </body>
 </html>
-  `);
+    `);
+  } catch (err) {
+    console.error('Error loading images:', err);
+    res.status(500).send('Database error: ' + err.message);
+  }
 });
 
 // Edit page for existing image
 app.get('/edit/:filename', async (req, res) => {
   const filename = req.params.filename;
-  const filepath = path.join(uploadsDir, filename);
   
-  if (!fs.existsSync(filepath)) {
-    return res.status(404).send('Image not found');
-  }
-
-  // Get image dimensions
-  let dimensions = { width: 0, height: 0 };
   try {
-    const metadata = await sharp(filepath).metadata();
-    dimensions = { width: metadata.width, height: metadata.height };
-  } catch (e) {
-    console.error('Could not read image metadata:', e);
-  }
+    const result = await pool.query(
+      'SELECT data, mimetype FROM images WHERE filename = $1',
+      [filename]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).send('Image not found');
+    }
 
-  const baseName = path.basename(filename, path.extname(filename));
-  const ext = path.extname(filename).toLowerCase().replace('.', '');
+    // Get image dimensions
+    let dimensions = { width: 0, height: 0 };
+    try {
+      const metadata = await sharp(result.rows[0].data).metadata();
+      dimensions = { width: metadata.width, height: metadata.height };
+    } catch (e) {
+      console.error('Could not read image metadata:', e);
+    }
 
-  res.send(`
+    const baseName = path.basename(filename, path.extname(filename));
+    const ext = path.extname(filename).toLowerCase().replace('.', '');
+
+    res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -394,34 +443,45 @@ app.get('/edit/:filename', async (req, res) => {
   </div>
 </body>
 </html>
-  `);
+    `);
+  } catch (err) {
+    console.error('Error loading image for edit:', err);
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
 // Handle edit
 app.post('/edit/:filename', async (req, res) => {
   try {
     const oldFilename = req.params.filename;
-    const oldPath = path.join(uploadsDir, oldFilename);
     
-    if (!fs.existsSync(oldPath)) {
+    // Get existing image from database
+    const result = await pool.query(
+      'SELECT data, mimetype FROM images WHERE filename = $1',
+      [oldFilename]
+    );
+    
+    if (result.rows.length === 0) {
       return res.status(404).send('Image not found');
     }
 
+    const oldImage = result.rows[0];
     const newName = req.body.newName || path.basename(oldFilename, path.extname(oldFilename));
     const width = req.body.width ? parseInt(req.body.width) : null;
     const height = req.body.height ? parseInt(req.body.height) : null;
     const format = req.body.format || null;
 
-    // Determine new extension
+    // Determine new extension and mimetype
     let ext = path.extname(oldFilename).toLowerCase();
+    let mimetype = oldImage.mimetype;
     if (format) {
       ext = '.' + format;
+      mimetype = 'image/' + (format === 'jpg' ? 'jpeg' : format);
     }
     const newFilename = newName + ext;
-    const newPath = path.join(uploadsDir, newFilename);
 
-    // Read original image
-    let sharpInstance = sharp(oldPath);
+    // Process image with sharp
+    let sharpInstance = sharp(oldImage.data);
 
     // Resize if dimensions provided
     if (width || height) {
@@ -440,19 +500,23 @@ app.post('/edit/:filename', async (req, res) => {
       sharpInstance = sharpInstance.webp({ quality: 85 });
     }
 
-    // Save to temp file first (in case old and new are the same)
-    const tempPath = path.join(uploadsDir, '_temp_' + Date.now() + ext);
-    await sharpInstance.toFile(tempPath);
+    // Get processed buffer
+    const newBuffer = await sharpInstance.toBuffer();
 
-    // Delete old file if different name
-    if (oldFilename !== newFilename && fs.existsSync(oldPath)) {
-      fs.unlinkSync(oldPath);
-    } else if (oldFilename === newFilename) {
-      fs.unlinkSync(oldPath);
+    // Update or insert in database
+    if (oldFilename === newFilename) {
+      await pool.query(
+        'UPDATE images SET data = $1, mimetype = $2 WHERE filename = $3',
+        [newBuffer, mimetype, oldFilename]
+      );
+    } else {
+      // Delete old, insert new
+      await pool.query('DELETE FROM images WHERE filename = $1', [oldFilename]);
+      await pool.query(
+        'INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3)',
+        [newFilename, mimetype, newBuffer]
+      );
     }
-
-    // Rename temp to final
-    fs.renameSync(tempPath, newPath);
 
     const imageUrl = `${req.protocol}://${req.get('host')}/${newFilename}`;
     
@@ -521,7 +585,7 @@ app.post('/edit/:filename', async (req, res) => {
 </html>
     `);
   } catch (err) {
-    console.error(err);
+    console.error('Error editing image:', err);
     res.status(500).send('Error processing image: ' + err.message);
   }
 });
@@ -538,14 +602,15 @@ app.post('/upload', upload.single('image'), async (req, res) => {
     const height = req.body.height ? parseInt(req.body.height) : null;
     const format = req.body.format || null;
 
-    // Determine filename
+    // Determine filename and mimetype
     let ext = path.extname(req.file.originalname).toLowerCase();
+    let mimetype = req.file.mimetype;
     if (format) {
       ext = '.' + format;
+      mimetype = 'image/' + (format === 'jpg' ? 'jpeg' : format);
     }
     const baseName = customName || path.basename(req.file.originalname, path.extname(req.file.originalname));
     const filename = baseName + ext;
-    const outputPath = path.join(uploadsDir, filename);
 
     // Process image with sharp
     let sharpInstance = sharp(req.file.buffer);
@@ -567,8 +632,15 @@ app.post('/upload', upload.single('image'), async (req, res) => {
       sharpInstance = sharpInstance.webp({ quality: 85 });
     }
 
-    // Save the processed image
-    await sharpInstance.toFile(outputPath);
+    // Get processed buffer
+    const buffer = await sharpInstance.toBuffer();
+
+    // Save to database (upsert)
+    await pool.query(
+      `INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3)
+       ON CONFLICT (filename) DO UPDATE SET mimetype = $2, data = $3`,
+      [filename, mimetype, buffer]
+    );
 
     const imageUrl = `${req.protocol}://${req.get('host')}/${filename}`;
     
@@ -637,21 +709,27 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 </html>
     `);
   } catch (err) {
-    console.error(err);
+    console.error('Error uploading image:', err);
     res.status(500).send('Error processing image: ' + err.message);
   }
 });
 
 // Delete image
-app.delete('/delete/:filename', (req, res) => {
-  const filename = req.params.filename;
-  const filepath = path.join(uploadsDir, filename);
-  
-  if (fs.existsSync(filepath)) {
-    fs.unlinkSync(filepath);
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ error: 'File not found' });
+app.delete('/delete/:filename', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM images WHERE filename = $1 RETURNING filename',
+      [req.params.filename]
+    );
+    
+    if (result.rowCount > 0) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'File not found' });
+    }
+  } catch (err) {
+    console.error('Error deleting image:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
