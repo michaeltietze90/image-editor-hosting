@@ -630,6 +630,7 @@ app.get('/editor', async (req, res) => {
     );
     const images = result.rows;
     const sourceImage = req.query.source || '';
+    const imageOptions = images.map(img => '<option value="' + img.filename + '">' + img.filename + '</option>').join('');
 
     res.send(`
 <!DOCTYPE html>
@@ -651,12 +652,9 @@ app.get('/editor', async (req, res) => {
       border-bottom: 1px solid #333;
     }
     .nav a { color: #4ecdc4; margin-right: 20px; text-decoration: none; }
-    .editor-container {
-      display: flex;
-      height: calc(100vh - 60px);
-    }
+    .editor-container { display: flex; height: calc(100vh - 60px); }
     .sidebar {
-      width: 300px;
+      width: 320px;
       background: #1a1a1a;
       padding: 20px;
       overflow-y: auto;
@@ -677,87 +675,74 @@ app.get('/editor', async (req, res) => {
       box-shadow: 0 0 50px rgba(78, 205, 196, 0.2);
       border: 2px solid #333;
     }
-    #canvas {
-      display: block;
-    }
-    .bg-toggle { margin-bottom: 15px; }
-    .bg-toggle label { display: inline; margin-left: 8px; cursor: pointer; }
+    #canvas { display: block; cursor: move; }
     h2 { color: #4ecdc4; font-size: 16px; margin-bottom: 15px; }
-    h3 { color: #888; font-size: 13px; margin: 20px 0 10px; text-transform: uppercase; }
-    label {
-      display: block;
-      color: #aaa;
-      font-size: 13px;
-      margin-bottom: 5px;
-    }
+    h3 { color: #888; font-size: 12px; margin: 15px 0 8px; text-transform: uppercase; }
+    label { display: block; color: #aaa; font-size: 12px; margin-bottom: 4px; }
     select, input[type="text"], input[type="number"] {
       width: 100%;
-      padding: 10px;
-      margin-bottom: 15px;
+      padding: 8px;
+      margin-bottom: 10px;
       background: #2a2a2a;
       border: 1px solid #444;
       border-radius: 6px;
       color: #fff;
-      font-size: 14px;
+      font-size: 13px;
     }
-    .row {
-      display: flex;
-      gap: 10px;
-    }
+    .row { display: flex; gap: 8px; }
     .row > div { flex: 1; }
-    input[type="range"] {
-      width: 100%;
-      margin: 10px 0;
-    }
-    .slider-value {
-      text-align: center;
-      color: #4ecdc4;
-      font-size: 14px;
-      margin-bottom: 10px;
-    }
+    input[type="range"] { width: 100%; margin: 5px 0; }
     button {
       width: 100%;
-      padding: 12px;
+      padding: 10px;
       background: #4ecdc4;
       color: #000;
       border: none;
       border-radius: 6px;
       font-weight: 600;
       cursor: pointer;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
+      font-size: 13px;
     }
     button:hover { background: #3dbdb5; }
-    .btn-secondary {
-      background: #555;
-      color: #fff;
-    }
-    .btn-gif {
-      background: #cc55aa;
-    }
-    .presets {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 15px;
-    }
-    .preset-btn {
-      padding: 8px;
-      font-size: 12px;
-    }
-    .info {
-      color: #666;
-      font-size: 12px;
-      margin-top: 5px;
-    }
-    .coord-display {
+    .btn-secondary { background: #555; color: #fff; }
+    .btn-danger { background: #c44; color: #fff; }
+    .btn-add { background: #5a5; }
+    .btn-gif { background: #cc55aa; }
+    .btn-small { padding: 6px 10px; font-size: 11px; width: auto; }
+    .presets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+    .preset-btn { padding: 6px; font-size: 11px; }
+    .layer-item {
       background: #2a2a2a;
+      border: 2px solid #444;
+      border-radius: 8px;
       padding: 10px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .layer-item.selected { border-color: #4ecdc4; background: #1a3a3a; }
+    .layer-item .layer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .layer-item .layer-name { font-weight: bold; font-size: 13px; color: #4ecdc4; }
+    .layer-item .layer-info { font-size: 11px; color: #888; }
+    .layer-controls { display: flex; gap: 4px; }
+    .coord-display {
+      background: #222;
+      padding: 8px;
       border-radius: 6px;
       font-family: monospace;
-      font-size: 12px;
-      margin-bottom: 15px;
+      font-size: 11px;
+      margin-bottom: 10px;
     }
     .coord-display span { color: #4ecdc4; }
+    .bg-toggle { margin-bottom: 10px; }
+    .bg-toggle label { display: inline; margin-left: 6px; cursor: pointer; font-size: 13px; }
+    .info { color: #666; font-size: 11px; margin-top: 5px; }
+    .section { border-top: 1px solid #333; padding-top: 10px; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -772,84 +757,89 @@ app.get('/editor', async (req, res) => {
     <div class="sidebar">
       <h2>🎯 Proto M Editor</h2>
       
-      <h3>Background</h3>
-      <div class="bg-toggle">
-        <input type="checkbox" id="bgToggle" onchange="toggleBg()">
-        <label for="bgToggle">Add background color</label>
-      </div>
-      <div id="bgColorPicker" style="display:none; margin-bottom:15px;">
-        <input type="color" id="bgColorInput" value="#000000" onchange="updateBgColor()" style="width:100%; height:40px; border:none; cursor:pointer;">
-      </div>
-      
-      <h3>Canvas Size</h3>
+      <h3>Canvas</h3>
       <div class="presets">
         <button class="preset-btn" onclick="setCanvasSize(1080, 1920)">1080×1920</button>
-        <button class="preset-btn" onclick="setCanvasSize(2160, 3840)">2160×3840</button>
         <button class="preset-btn" onclick="setCanvasSize(540, 960)">540×960</button>
         <button class="preset-btn btn-secondary" onclick="setCanvasSize(1920, 1080)">1920×1080</button>
       </div>
-      
-      <h3>Select Image</h3>
-      <select id="imageSelect" onchange="loadImage()">
-        <option value="">-- Select image --</option>
-        ${images.map(img => '<option value="' + img.filename + '"' + (img.filename === sourceImage ? ' selected' : '') + '>' + img.filename + '</option>').join('')}
-      </select>
-      
-      <h3>Position</h3>
-      <div class="coord-display">
-        X: <span id="posX">0</span> | Y: <span id="posY">0</span> | 
-        W: <span id="imgW">0</span> × H: <span id="imgH">0</span>
+      <div class="bg-toggle">
+        <input type="checkbox" id="bgToggle" onchange="toggleBg()">
+        <label for="bgToggle">Background color</label>
+        <input type="color" id="bgColorInput" value="#000000" onchange="updateBgColor()" style="width:30px; height:20px; border:none; cursor:pointer; vertical-align:middle; margin-left:10px; display:none;">
       </div>
       
-      <div class="row">
-        <div>
-          <label>X Position</label>
-          <input type="number" id="inputX" value="0" onchange="updateFromInputs()">
+      <div class="section">
+        <h3>Add Image</h3>
+        <select id="imageSelect">
+          <option value="">-- Select image --</option>
+          ${imageOptions}
+        </select>
+        <button class="btn-add" onclick="addLayer()">+ Add to Canvas</button>
+      </div>
+      
+      <div class="section">
+        <h3>Layers <span id="layerCount">(0)</span></h3>
+        <div id="layerList"></div>
+      </div>
+      
+      <div class="section" id="selectedControls" style="display:none;">
+        <h3>Selected Layer</h3>
+        <div class="coord-display">
+          X: <span id="posX">0</span> | Y: <span id="posY">0</span> | 
+          W: <span id="imgW">0</span> × H: <span id="imgH">0</span>
         </div>
-        <div>
-          <label>Y Position</label>
-          <input type="number" id="inputY" value="0" onchange="updateFromInputs()">
+        
+        <div class="row">
+          <div>
+            <label>X</label>
+            <input type="number" id="inputX" value="0" onchange="updateFromInputs()">
+          </div>
+          <div>
+            <label>Y</label>
+            <input type="number" id="inputY" value="0" onchange="updateFromInputs()">
+          </div>
+        </div>
+        
+        <label>Scale: <span id="scaleValue">100</span>%</label>
+        <input type="range" id="scaleSlider" min="5" max="400" value="100" oninput="updateScale()">
+        
+        <div class="row">
+          <div>
+            <label>Width</label>
+            <input type="number" id="inputW" value="0" onchange="updateFromSize()">
+          </div>
+          <div>
+            <label>Height</label>
+            <input type="number" id="inputH" value="0" onchange="updateFromSize()">
+          </div>
+        </div>
+        
+        <div class="presets">
+          <button class="preset-btn btn-secondary" onclick="positionPreset('tl')">↖TL</button>
+          <button class="preset-btn btn-secondary" onclick="positionPreset('center')">⊙</button>
+          <button class="preset-btn btn-secondary" onclick="positionPreset('tr')">↗TR</button>
+          <button class="preset-btn btn-secondary" onclick="positionPreset('bl')">↙BL</button>
+          <button class="preset-btn btn-secondary" onclick="positionPreset('fit')">Fit</button>
+          <button class="preset-btn btn-secondary" onclick="positionPreset('br')">↘BR</button>
+        </div>
+        
+        <button class="btn-danger" onclick="deleteSelected()">🗑 Delete Layer</button>
+      </div>
+      
+      <div class="section">
+        <h3>Save</h3>
+        <input type="text" id="outputName" placeholder="proto-image">
+        <button onclick="saveImage()">💾 Save as PNG</button>
+        <button class="btn-gif" onclick="saveAsGif()">🎬 Save as GIF</button>
+        <div id="gifOptions" style="display:none; margin-top:8px;">
+          <label>Duration (seconds)</label>
+          <input type="number" id="gifDuration" value="3" min="0.5" max="30" step="0.5">
+          <button class="btn-gif" onclick="doSaveGif()">✓ Create GIF</button>
         </div>
       </div>
       
-      <h3>Scale</h3>
-      <input type="range" id="scaleSlider" min="10" max="300" value="100" oninput="updateScale()">
-      <div class="slider-value"><span id="scaleValue">100</span>%</div>
-      
-      <div class="row">
-        <div>
-          <label>Width</label>
-          <input type="number" id="inputW" value="0" onchange="updateFromSize()">
-        </div>
-        <div>
-          <label>Height</label>
-          <input type="number" id="inputH" value="0" onchange="updateFromSize()">
-        </div>
-      </div>
-      
-      <h3>Quick Position</h3>
-      <div class="presets">
-        <button class="preset-btn btn-secondary" onclick="positionPreset('tl')">↖ Top-Left</button>
-        <button class="preset-btn btn-secondary" onclick="positionPreset('tr')">↗ Top-Right</button>
-        <button class="preset-btn btn-secondary" onclick="positionPreset('center')">⊙ Center</button>
-        <button class="preset-btn btn-secondary" onclick="positionPreset('fit')">⊡ Fit</button>
-        <button class="preset-btn btn-secondary" onclick="positionPreset('bl')">↙ Bottom-Left</button>
-        <button class="preset-btn btn-secondary" onclick="positionPreset('br')">↘ Bottom-Right</button>
-      </div>
-      
-      <h3>Save</h3>
-      <label>Output Filename</label>
-      <input type="text" id="outputName" placeholder="proto-image">
-      
-      <button onclick="saveImage()">💾 Save as PNG</button>
-      <button class="btn-gif" onclick="saveAsGif()">🎬 Save as GIF (show then hide)</button>
-      
-      <div id="gifOptions" style="display:none; margin-top:10px;">
-        <label>Show Duration (seconds)</label>
-        <input type="number" id="gifDuration" value="3" min="0.5" max="30" step="0.5">
-      </div>
-      
-      <p class="info">Drag the image to move it. Use scroll or slider to resize.</p>
+      <p class="info">Click layer to select. Drag to move. Scroll to resize.</p>
     </div>
     
     <div class="canvas-area">
@@ -863,14 +853,13 @@ app.get('/editor', async (req, res) => {
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     
-    let img = null;
-    let imgX = 0, imgY = 0;
-    let imgScale = 1;
-    let originalW = 0, originalH = 0;
+    let layers = [];
+    let selectedIndex = -1;
     let isDragging = false;
     let dragStartX = 0, dragStartY = 0;
+    let useBgColor = false;
+    let bgColor = '#000000';
     
-    // Scale canvas display for screen
     function updateCanvasDisplay() {
       const maxH = window.innerHeight - 100;
       const scale = Math.min(1, maxH / canvas.height, 600 / canvas.width);
@@ -885,34 +874,9 @@ app.get('/editor', async (req, res) => {
       draw();
     }
     
-    function loadImage() {
-      const filename = document.getElementById('imageSelect').value;
-      if (!filename) return;
-      
-      img = new window.Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = function() {
-        originalW = img.width;
-        originalH = img.height;
-        imgScale = 1;
-        
-        // Center image
-        imgX = (canvas.width - originalW) / 2;
-        imgY = (canvas.height - originalH) / 2;
-        
-        document.getElementById('scaleSlider').value = 100;
-        updateDisplay();
-        draw();
-      };
-      img.src = '/' + filename + '?t=' + Date.now();
-    }
-    
-    let useBgColor = false;
-    let bgColor = '#000000';
-    
     function toggleBg() {
       useBgColor = document.getElementById('bgToggle').checked;
-      document.getElementById('bgColorPicker').style.display = useBgColor ? 'block' : 'none';
+      document.getElementById('bgColorInput').style.display = useBgColor ? 'inline' : 'none';
       draw();
     }
     
@@ -921,107 +885,221 @@ app.get('/editor', async (req, res) => {
       draw();
     }
     
+    function addLayer() {
+      const filename = document.getElementById('imageSelect').value;
+      if (!filename) return;
+      
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function() {
+        const layer = {
+          img: img,
+          filename: filename,
+          x: (canvas.width - img.width) / 2,
+          y: (canvas.height - img.height) / 2,
+          scale: 1,
+          originalW: img.width,
+          originalH: img.height
+        };
+        layers.push(layer);
+        selectedIndex = layers.length - 1;
+        updateLayerList();
+        updateDisplay();
+        draw();
+      };
+      img.src = '/' + filename + '?t=' + Date.now();
+    }
+    
+    function updateLayerList() {
+      const list = document.getElementById('layerList');
+      document.getElementById('layerCount').textContent = '(' + layers.length + ')';
+      
+      list.innerHTML = layers.map((layer, i) => {
+        const w = Math.round(layer.originalW * layer.scale);
+        const h = Math.round(layer.originalH * layer.scale);
+        return '<div class="layer-item' + (i === selectedIndex ? ' selected' : '') + '" onclick="selectLayer(' + i + ')">' +
+          '<div class="layer-header">' +
+            '<span class="layer-name">' + (i + 1) + '. ' + layer.filename.substring(0, 15) + '</span>' +
+            '<div class="layer-controls">' +
+              (i > 0 ? '<button class="btn-small btn-secondary" onclick="event.stopPropagation();moveLayer(' + i + ',-1)">↑</button>' : '') +
+              (i < layers.length - 1 ? '<button class="btn-small btn-secondary" onclick="event.stopPropagation();moveLayer(' + i + ',1)">↓</button>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="layer-info">X:' + Math.round(layer.x) + ' Y:' + Math.round(layer.y) + ' | ' + w + '×' + h + '</div>' +
+        '</div>';
+      }).join('');
+      
+      document.getElementById('selectedControls').style.display = selectedIndex >= 0 ? 'block' : 'none';
+    }
+    
+    function selectLayer(i) {
+      selectedIndex = i;
+      updateLayerList();
+      updateDisplay();
+    }
+    
+    function moveLayer(i, dir) {
+      const newI = i + dir;
+      if (newI < 0 || newI >= layers.length) return;
+      [layers[i], layers[newI]] = [layers[newI], layers[i]];
+      if (selectedIndex === i) selectedIndex = newI;
+      else if (selectedIndex === newI) selectedIndex = i;
+      updateLayerList();
+      draw();
+    }
+    
+    function deleteSelected() {
+      if (selectedIndex < 0) return;
+      layers.splice(selectedIndex, 1);
+      selectedIndex = layers.length > 0 ? Math.min(selectedIndex, layers.length - 1) : -1;
+      updateLayerList();
+      updateDisplay();
+      draw();
+    }
+    
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
       if (useBgColor) {
         ctx.fillStyle = bgColor;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
       
-      if (img && img.complete) {
-        const w = originalW * imgScale;
-        const h = originalH * imgScale;
-        ctx.drawImage(img, imgX, imgY, w, h);
-      }
+      layers.forEach((layer, i) => {
+        if (layer.img && layer.img.complete) {
+          const w = layer.originalW * layer.scale;
+          const h = layer.originalH * layer.scale;
+          ctx.drawImage(layer.img, layer.x, layer.y, w, h);
+          
+          if (i === selectedIndex) {
+            ctx.strokeStyle = '#4ecdc4';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(layer.x, layer.y, w, h);
+          }
+        }
+      });
+    }
+    
+    function getSelected() {
+      return selectedIndex >= 0 ? layers[selectedIndex] : null;
     }
     
     function updateDisplay() {
-      const w = Math.round(originalW * imgScale);
-      const h = Math.round(originalH * imgScale);
+      const layer = getSelected();
+      if (!layer) return;
       
-      document.getElementById('posX').textContent = Math.round(imgX);
-      document.getElementById('posY').textContent = Math.round(imgY);
+      const w = Math.round(layer.originalW * layer.scale);
+      const h = Math.round(layer.originalH * layer.scale);
+      
+      document.getElementById('posX').textContent = Math.round(layer.x);
+      document.getElementById('posY').textContent = Math.round(layer.y);
       document.getElementById('imgW').textContent = w;
       document.getElementById('imgH').textContent = h;
-      
-      document.getElementById('inputX').value = Math.round(imgX);
-      document.getElementById('inputY').value = Math.round(imgY);
+      document.getElementById('inputX').value = Math.round(layer.x);
+      document.getElementById('inputY').value = Math.round(layer.y);
       document.getElementById('inputW').value = w;
       document.getElementById('inputH').value = h;
-      document.getElementById('scaleValue').textContent = Math.round(imgScale * 100);
+      document.getElementById('scaleSlider').value = layer.scale * 100;
+      document.getElementById('scaleValue').textContent = Math.round(layer.scale * 100);
     }
     
     function updateFromInputs() {
-      imgX = parseInt(document.getElementById('inputX').value) || 0;
-      imgY = parseInt(document.getElementById('inputY').value) || 0;
+      const layer = getSelected();
+      if (!layer) return;
+      layer.x = parseInt(document.getElementById('inputX').value) || 0;
+      layer.y = parseInt(document.getElementById('inputY').value) || 0;
+      updateLayerList();
       updateDisplay();
       draw();
     }
     
     function updateFromSize() {
-      const newW = parseInt(document.getElementById('inputW').value) || originalW;
-      if (originalW > 0) {
-        imgScale = newW / originalW;
-        document.getElementById('scaleSlider').value = imgScale * 100;
-      }
+      const layer = getSelected();
+      if (!layer) return;
+      const newW = parseInt(document.getElementById('inputW').value) || layer.originalW;
+      layer.scale = newW / layer.originalW;
+      updateLayerList();
       updateDisplay();
       draw();
     }
     
     function updateScale() {
-      imgScale = document.getElementById('scaleSlider').value / 100;
+      const layer = getSelected();
+      if (!layer) return;
+      layer.scale = document.getElementById('scaleSlider').value / 100;
+      updateLayerList();
       updateDisplay();
       draw();
     }
     
     function positionPreset(preset) {
-      if (!img) return;
-      const w = originalW * imgScale;
-      const h = originalH * imgScale;
+      const layer = getSelected();
+      if (!layer) return;
+      const w = layer.originalW * layer.scale;
+      const h = layer.originalH * layer.scale;
       
       switch(preset) {
-        case 'tl': imgX = 0; imgY = 0; break;
-        case 'tr': imgX = canvas.width - w; imgY = 0; break;
-        case 'bl': imgX = 0; imgY = canvas.height - h; break;
-        case 'br': imgX = canvas.width - w; imgY = canvas.height - h; break;
-        case 'center': imgX = (canvas.width - w) / 2; imgY = (canvas.height - h) / 2; break;
+        case 'tl': layer.x = 0; layer.y = 0; break;
+        case 'tr': layer.x = canvas.width - w; layer.y = 0; break;
+        case 'bl': layer.x = 0; layer.y = canvas.height - h; break;
+        case 'br': layer.x = canvas.width - w; layer.y = canvas.height - h; break;
+        case 'center': layer.x = (canvas.width - w) / 2; layer.y = (canvas.height - h) / 2; break;
         case 'fit':
-          const fitScale = Math.min(canvas.width / originalW, canvas.height / originalH);
-          imgScale = fitScale;
-          document.getElementById('scaleSlider').value = fitScale * 100;
-          imgX = (canvas.width - originalW * fitScale) / 2;
-          imgY = (canvas.height - originalH * fitScale) / 2;
+          layer.scale = Math.min(canvas.width / layer.originalW, canvas.height / layer.originalH);
+          layer.x = (canvas.width - layer.originalW * layer.scale) / 2;
+          layer.y = (canvas.height - layer.originalH * layer.scale) / 2;
           break;
       }
+      updateLayerList();
       updateDisplay();
       draw();
     }
     
-    // Mouse drag
+    // Find layer at position
+    function getLayerAt(x, y) {
+      for (let i = layers.length - 1; i >= 0; i--) {
+        const layer = layers[i];
+        const w = layer.originalW * layer.scale;
+        const h = layer.originalH * layer.scale;
+        if (x >= layer.x && x <= layer.x + w && y >= layer.y && y <= layer.y + h) {
+          return i;
+        }
+      }
+      return -1;
+    }
+    
     canvas.addEventListener('mousedown', (e) => {
-      if (!img) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
-      isDragging = true;
-      dragStartX = x - imgX;
-      dragStartY = y - imgY;
+      const clickedLayer = getLayerAt(x, y);
+      if (clickedLayer >= 0) {
+        selectedIndex = clickedLayer;
+        updateLayerList();
+        updateDisplay();
+        
+        const layer = layers[selectedIndex];
+        isDragging = true;
+        dragStartX = x - layer.x;
+        dragStartY = y - layer.y;
+      }
+      draw();
     });
     
     canvas.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
+      if (!isDragging || selectedIndex < 0) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
-      imgX = x - dragStartX;
-      imgY = y - dragStartY;
+      const layer = layers[selectedIndex];
+      layer.x = x - dragStartX;
+      layer.y = y - dragStartY;
+      updateLayerList();
       updateDisplay();
       draw();
     });
@@ -1029,31 +1107,34 @@ app.get('/editor', async (req, res) => {
     canvas.addEventListener('mouseup', () => isDragging = false);
     canvas.addEventListener('mouseleave', () => isDragging = false);
     
-    // Scroll to resize
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      const layer = getSelected();
+      if (!layer) return;
       const delta = e.deltaY > 0 ? 0.95 : 1.05;
-      imgScale *= delta;
-      imgScale = Math.max(0.1, Math.min(5, imgScale));
-      document.getElementById('scaleSlider').value = imgScale * 100;
+      layer.scale *= delta;
+      layer.scale = Math.max(0.05, Math.min(10, layer.scale));
+      updateLayerList();
       updateDisplay();
       draw();
     });
     
     async function saveImage() {
       const name = document.getElementById('outputName').value || 'proto-image';
+      // Draw without selection border
+      const oldSelected = selectedIndex;
+      selectedIndex = -1;
+      draw();
+      
       const dataUrl = canvas.toDataURL('image/png');
+      selectedIndex = oldSelected;
+      draw();
       
       const response = await fetch('/save-editor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          imageData: dataUrl, 
-          filename: name + '.png',
-          mimetype: 'image/png'
-        })
+        body: JSON.stringify({ imageData: dataUrl, filename: name + '.png', mimetype: 'image/png' })
       });
-      
       const result = await response.json();
       if (result.success) {
         alert('Saved! URL: ' + result.url);
@@ -1064,31 +1145,27 @@ app.get('/editor', async (req, res) => {
     }
     
     function saveAsGif() {
-      const opts = document.getElementById('gifOptions');
-      opts.style.display = opts.style.display === 'none' ? 'block' : 'none';
-      if (opts.style.display === 'block') {
-        document.querySelector('.btn-gif').textContent = '✓ Create GIF Now';
-        document.querySelector('.btn-gif').onclick = doSaveGif;
-      }
+      document.getElementById('gifOptions').style.display = 
+        document.getElementById('gifOptions').style.display === 'none' ? 'block' : 'none';
     }
     
     async function doSaveGif() {
       const name = document.getElementById('outputName').value || 'proto-animation';
       const duration = document.getElementById('gifDuration').value || 3;
+      
+      const oldSelected = selectedIndex;
+      selectedIndex = -1;
+      draw();
+      
       const dataUrl = canvas.toDataURL('image/png');
+      selectedIndex = oldSelected;
+      draw();
       
       const response = await fetch('/save-editor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          imageData: dataUrl, 
-          filename: name + '.gif',
-          mimetype: 'image/gif',
-          createGif: true,
-          duration: parseFloat(duration)
-        })
+        body: JSON.stringify({ imageData: dataUrl, filename: name + '.gif', mimetype: 'image/gif', createGif: true, duration: parseFloat(duration) })
       });
-      
       const result = await response.json();
       if (result.success) {
         alert('GIF Created! URL: ' + result.url);
@@ -1098,10 +1175,9 @@ app.get('/editor', async (req, res) => {
       }
     }
     
-    // Init
     updateCanvasDisplay();
     window.addEventListener('resize', updateCanvasDisplay);
-    ${sourceImage ? "document.getElementById('imageSelect').value = '" + sourceImage + "'; loadImage();" : ''}
+    ${sourceImage ? "document.getElementById('imageSelect').value = '" + sourceImage + "'; addLayer();" : ''}
   </script>
 </body>
 </html>
