@@ -500,12 +500,24 @@ app.post('/create-gif', upload.single('image'), async (req, res) => {
       .raw()
       .toBuffer();
 
+    // Convert transparent pixels to magenta for GIF transparency
+    const magicR = 255, magicG = 0, magicB = 255;
+    const processedBuffer = Buffer.from(rawBuffer);
+    for (let i = 0; i < processedBuffer.length; i += 4) {
+      if (processedBuffer[i + 3] < 128) { // If mostly transparent
+        processedBuffer[i] = magicR;
+        processedBuffer[i + 1] = magicG;
+        processedBuffer[i + 2] = magicB;
+        processedBuffer[i + 3] = 255;
+      }
+    }
+
     // Create GIF encoder
-    const encoder = new GIFEncoder(width, height, 'neuquant', true); // true = use global palette
+    const encoder = new GIFEncoder(width, height, 'neuquant', true);
     encoder.setRepeat(-1); // -1 = no repeat (play once)
     encoder.setDelay(duration * 1000); // delay in ms
     encoder.setQuality(10);
-    encoder.setTransparent(0x000000);
+    encoder.setTransparent(0xFF00FF); // Magenta = transparent
 
     // Start encoding
     encoder.start();
@@ -516,12 +528,13 @@ app.post('/create-gif', upload.single('image'), async (req, res) => {
 
     // Draw the image frame
     const imageData = ctx.createImageData(width, height);
-    imageData.data.set(rawBuffer);
+    imageData.data.set(processedBuffer);
     ctx.putImageData(imageData, 0, 0);
     encoder.addFrame(ctx);
 
-    // Create transparent/empty frame
-    ctx.clearRect(0, 0, width, height);
+    // Create transparent frame (all magenta = transparent)
+    ctx.fillStyle = '#FF00FF';
+    ctx.fillRect(0, 0, width, height);
     encoder.setDelay(100); // Short delay for final frame
     encoder.addFrame(ctx);
 
@@ -1352,24 +1365,38 @@ app.post('/save-editor', async (req, res) => {
       
       const rawBuffer = await sharp(buffer).ensureAlpha().raw().toBuffer();
       
+      // Convert transparent pixels to a magic color (magenta) for GIF transparency
+      const magicR = 255, magicG = 0, magicB = 255;
+      const processedBuffer = Buffer.from(rawBuffer);
+      for (let i = 0; i < processedBuffer.length; i += 4) {
+        if (processedBuffer[i + 3] < 128) { // If mostly transparent
+          processedBuffer[i] = magicR;
+          processedBuffer[i + 1] = magicG;
+          processedBuffer[i + 2] = magicB;
+          processedBuffer[i + 3] = 255;
+        }
+      }
+      
       const encoder = new GIFEncoder(width, height, 'neuquant', true);
       encoder.setRepeat(-1); // No repeat
       encoder.setDelay(duration * 1000);
       encoder.setQuality(10);
+      encoder.setTransparent(0xFF00FF); // Magenta = transparent
       
       encoder.start();
       
       const canvas = createCanvas(width, height);
       const ctx = canvas.getContext('2d');
       
-      // Draw image frame (transparent areas will be handled by GIF encoder)
+      // Draw image frame with magic color for transparent areas
       const imageData2 = ctx.createImageData(width, height);
-      imageData2.data.set(rawBuffer);
+      imageData2.data.set(processedBuffer);
       ctx.putImageData(imageData2, 0, 0);
       encoder.addFrame(ctx);
       
-      // Fully transparent frame
-      ctx.clearRect(0, 0, width, height);
+      // Fully transparent frame (all magenta)
+      ctx.fillStyle = '#FF00FF';
+      ctx.fillRect(0, 0, width, height);
       encoder.setDelay(100);
       encoder.addFrame(ctx);
       
