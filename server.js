@@ -18,7 +18,7 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Initialize database table
+// Initialize database tables
 async function initDB() {
   try {
     await pool.query(`
@@ -30,6 +30,17 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    // Static links table - permanent URLs that can point to different images
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS static_links (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        image_filename VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
     console.log('Database initialized');
   } catch (err) {
     console.error('Database init error:', err);
@@ -59,8 +70,33 @@ app.use(express.json({ limit: '10mb' }));
 // Serve images from database
 app.get('/:filename', async (req, res, next) => {
   // Skip if it looks like a route
-  if (['upload', 'edit', 'delete', 'favicon.ico', 'gif', 'create-gif', 'editor', 'save-editor'].includes(req.params.filename)) {
+  if (['upload', 'edit', 'delete', 'favicon.ico', 'gif', 'create-gif', 'editor', 'save-editor', 'links', 'create-link', 'update-link', 'delete-link'].includes(req.params.filename)) {
     return next();
+  }
+  
+  // Check if this is a static link first
+  try {
+    const linkResult = await pool.query(
+      'SELECT image_filename FROM static_links WHERE slug = $1',
+      [req.params.filename]
+    );
+    
+    if (linkResult.rows.length > 0 && linkResult.rows[0].image_filename) {
+      // Redirect to the actual image
+      const imageResult = await pool.query(
+        'SELECT data, mimetype FROM images WHERE filename = $1',
+        [linkResult.rows[0].image_filename]
+      );
+      
+      if (imageResult.rows.length > 0) {
+        const image = imageResult.rows[0];
+        res.set('Content-Type', image.mimetype);
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(image.data);
+      }
+    }
+  } catch (err) {
+    console.error('Error checking static link:', err);
   }
   
   try {
@@ -222,6 +258,7 @@ app.get('/', async (req, res) => {
     <a href="/">📷 Upload</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
+    <a href="/links">🔗 Static Links</a>
   </div>
   
   <h1>🖼️ Image Hosting</h1>
@@ -337,6 +374,7 @@ app.get('/gif', async (req, res) => {
     <a href="/">📷 Upload</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
+    <a href="/links">🔗 Static Links</a>
   </div>
   
   <h1>🎬 GIF Creator</h1>
@@ -727,6 +765,7 @@ app.get('/editor', async (req, res) => {
     <a href="/">📷 Upload</a>
     <a href="/gif">🎬 GIF Creator</a>
     <a href="/editor">🎯 Editor</a>
+    <a href="/links">🔗 Static Links</a>
   </div>
   
   <div class="editor-container">
@@ -1132,6 +1171,283 @@ app.post('/save-editor', async (req, res) => {
     });
   } catch (err) {
     console.error('Error saving editor image:', err);
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// Static Links management page
+app.get('/links', async (req, res) => {
+  try {
+    const linksResult = await pool.query(
+      'SELECT slug, image_filename, created_at FROM static_links ORDER BY created_at DESC'
+    );
+    const links = linksResult.rows;
+    
+    const imagesResult = await pool.query(
+      'SELECT filename FROM images ORDER BY created_at DESC'
+    );
+    const images = imagesResult.rows;
+    
+    const baseUrl = req.protocol + '://' + req.get('host');
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Static Links</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px; 
+      margin: 0 auto; 
+      padding: 20px;
+      background: #0f0f0f;
+      color: #e0e0e0;
+    }
+    h1 { color: #4ecdc4; margin-bottom: 10px; }
+    h2 { color: #4ecdc4; margin-top: 30px; }
+    .nav { margin-bottom: 20px; }
+    .nav a { color: #4ecdc4; margin-right: 20px; text-decoration: none; }
+    .description { color: #888; margin-bottom: 30px; }
+    .form-box {
+      background: #1a1a1a;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 30px;
+      border: 1px solid #333;
+    }
+    label { display: block; color: #aaa; font-size: 14px; margin-bottom: 5px; }
+    input[type="text"], select {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+    }
+    button {
+      background: #4ecdc4;
+      color: #000;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #3dbdb5; }
+    .link-item {
+      background: #1a1a1a;
+      padding: 20px;
+      margin: 15px 0;
+      border-radius: 12px;
+      border: 1px solid #333;
+    }
+    .link-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    .link-slug {
+      font-size: 20px;
+      font-weight: bold;
+      color: #4ecdc4;
+    }
+    .link-url {
+      background: #2a2a2a;
+      padding: 10px 15px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 14px;
+      color: #4ecdc4;
+      margin-bottom: 15px;
+      word-break: break-all;
+    }
+    .link-preview {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .link-preview img {
+      width: 100px;
+      height: 70px;
+      object-fit: cover;
+      border-radius: 6px;
+      background: #333;
+    }
+    .link-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex: 1;
+    }
+    .link-controls select {
+      margin-bottom: 0;
+      flex: 1;
+    }
+    .btn-small {
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+    .btn-delete {
+      background: #c44;
+    }
+    .btn-copy {
+      background: #555;
+    }
+    .empty-state {
+      text-align: center;
+      color: #666;
+      padding: 40px;
+    }
+    .hint { color: #666; font-size: 12px; margin-top: -10px; margin-bottom: 15px; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">📷 Upload</a>
+    <a href="/gif">🎬 GIF Creator</a>
+    <a href="/editor">🎯 Editor</a>
+    <a href="/links">🔗 Static Links</a>
+  </div>
+  
+  <h1>🔗 Static Links</h1>
+  <p class="description">Create permanent URLs that always work. Change which image they show anytime - perfect for Proto M!</p>
+  
+  <div class="form-box">
+    <form action="/create-link" method="post">
+      <label>Link Name (URL slug)</label>
+      <input type="text" name="slug" placeholder="e.g., display1, main-logo, promo" required pattern="[a-zA-Z0-9_-]+">
+      <p class="hint">Letters, numbers, dashes, underscores only. This becomes: ${baseUrl}/your-name</p>
+      
+      <label>Assign Image (optional - can set later)</label>
+      <select name="imageFilename">
+        <option value="">-- None --</option>
+        ${images.map(img => '<option value="' + img.filename + '">' + img.filename + '</option>').join('')}
+      </select>
+      
+      <button type="submit">Create Static Link</button>
+    </form>
+  </div>
+  
+  <h2>Your Static Links (${links.length})</h2>
+  
+  ${links.length === 0 ? '<div class="empty-state">No static links yet. Create one above!</div>' : ''}
+  
+  ${links.map(link => {
+    const fullUrl = baseUrl + '/' + link.slug;
+    return '<div class="link-item">' +
+      '<div class="link-header">' +
+        '<span class="link-slug">/' + link.slug + '</span>' +
+        '<button class="btn-small btn-delete" onclick="deleteLink(\\'' + link.slug + '\\')">Delete</button>' +
+      '</div>' +
+      '<div class="link-url">' + fullUrl + '</div>' +
+      '<div class="link-preview">' +
+        (link.image_filename ? '<img src="/' + link.image_filename + '?t=' + Date.now() + '" alt="preview">' : '<img src="" alt="no image" style="display:none">') +
+        '<div class="link-controls">' +
+          '<select onchange="updateLink(\\'' + link.slug + '\\', this.value)">' +
+            '<option value="">-- No image --</option>' +
+            images.map(img => '<option value="' + img.filename + '"' + (img.filename === link.image_filename ? ' selected' : '') + '>' + img.filename + '</option>').join('') +
+          '</select>' +
+          '<button class="btn-small btn-copy" onclick="copyUrl(\\'' + fullUrl + '\\')">Copy URL</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('')}
+  
+  <script>
+    function copyUrl(url) {
+      navigator.clipboard.writeText(url);
+      alert('Copied: ' + url);
+    }
+    
+    async function updateLink(slug, filename) {
+      const response = await fetch('/update-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, filename })
+      });
+      const result = await response.json();
+      if (result.success) {
+        location.reload();
+      } else {
+        alert('Error: ' + result.error);
+      }
+    }
+    
+    async function deleteLink(slug) {
+      if (!confirm('Delete static link /' + slug + '?')) return;
+      const response = await fetch('/delete-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug })
+      });
+      const result = await response.json();
+      if (result.success) {
+        location.reload();
+      } else {
+        alert('Error: ' + result.error);
+      }
+    }
+  </script>
+</body>
+</html>
+    `);
+  } catch (err) {
+    console.error('Error loading links page:', err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Create static link
+app.post('/create-link', async (req, res) => {
+  try {
+    const slug = req.body.slug.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const imageFilename = req.body.imageFilename || null;
+    
+    await pool.query(
+      'INSERT INTO static_links (slug, image_filename) VALUES ($1, $2)',
+      [slug, imageFilename]
+    );
+    
+    res.redirect('/links');
+  } catch (err) {
+    console.error('Error creating link:', err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Update static link
+app.post('/update-link', async (req, res) => {
+  try {
+    const { slug, filename } = req.body;
+    
+    await pool.query(
+      'UPDATE static_links SET image_filename = $1 WHERE slug = $2',
+      [filename || null, slug]
+    );
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating link:', err);
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// Delete static link
+app.post('/delete-link', async (req, res) => {
+  try {
+    const { slug } = req.body;
+    
+    await pool.query('DELETE FROM static_links WHERE slug = $1', [slug]);
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting link:', err);
     res.json({ success: false, error: err.message });
   }
 });
