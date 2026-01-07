@@ -3,6 +3,8 @@ const multer = require('multer');
 const path = require('path');
 const sharp = require('sharp');
 const { Pool } = require('pg');
+const GIFEncoder = require('gif-encoder-2');
+const { createCanvas, Image } = require('canvas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,7 +56,7 @@ const upload = multer({
 // Serve images from database
 app.get('/:filename', async (req, res, next) => {
   // Skip if it looks like a route
-  if (['upload', 'edit', 'delete', 'favicon.ico'].includes(req.params.filename)) {
+  if (['upload', 'edit', 'delete', 'favicon.ico', 'gif', 'create-gif'].includes(req.params.filename)) {
     return next();
   }
   
@@ -78,21 +80,8 @@ app.get('/:filename', async (req, res, next) => {
   }
 });
 
-// Upload page
-app.get('/', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT filename, LENGTH(data) as size FROM images ORDER BY created_at DESC'
-    );
-    const images = result.rows;
-
-    res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Image Hosting</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
+// Common styles
+const commonStyles = `
     * { box-sizing: border-box; }
     body { 
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -103,7 +92,8 @@ app.get('/', async (req, res) => {
       color: #e0e0e0;
     }
     h1 { color: #4ecdc4; margin-bottom: 30px; }
-    .upload-form {
+    h2 { color: #4ecdc4; }
+    .upload-form, .gif-form {
       background: #1a1a1a;
       padding: 25px;
       border-radius: 12px;
@@ -196,27 +186,40 @@ app.get('/', async (req, res) => {
       flex-wrap: wrap;
       margin-top: 10px;
     }
-    .copy-btn {
-      background: #555;
-    }
-    .edit-btn {
-      background: #5588cc;
-    }
-    .delete-btn {
-      background: #c44;
-    }
-    .hint {
-      color: #666;
-      font-size: 12px;
-      margin-top: 5px;
-    }
-    .size-info {
-      color: #666;
-      font-size: 12px;
-    }
-  </style>
+    .copy-btn { background: #555; }
+    .edit-btn { background: #5588cc; }
+    .gif-btn { background: #cc55aa; }
+    .delete-btn { background: #c44; }
+    .hint { color: #666; font-size: 12px; margin-top: 5px; }
+    .size-info { color: #666; font-size: 12px; }
+    .nav { margin-bottom: 20px; }
+    .nav a { color: #4ecdc4; margin-right: 20px; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .back { color: #4ecdc4; text-decoration: none; display: inline-block; margin-bottom: 20px; }
+`;
+
+// Upload page
+app.get('/', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT filename, LENGTH(data) as size FROM images ORDER BY created_at DESC'
+    );
+    const images = result.rows;
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Image Hosting</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>${commonStyles}</style>
 </head>
 <body>
+  <div class="nav">
+    <a href="/">📷 Upload</a>
+    <a href="/gif">🎬 GIF Creator</a>
+  </div>
+  
   <h1>🖼️ Image Hosting</h1>
   
   <div class="upload-form">
@@ -263,6 +266,7 @@ app.get('/', async (req, res) => {
           <div class="btn-group">
             <button class="btn-small copy-btn" onclick="copyUrl('${img.filename}')">Copy URL</button>
             <a class="btn btn-small edit-btn" href="/edit/${encodeURIComponent(img.filename)}">Edit / Resize</a>
+            <a class="btn btn-small gif-btn" href="/gif?source=${encodeURIComponent(img.filename)}">Make GIF</a>
             <button class="btn-small delete-btn" onclick="deleteImg('${img.filename}')">Delete</button>
           </div>
         </div>
@@ -288,6 +292,289 @@ app.get('/', async (req, res) => {
   } catch (err) {
     console.error('Error loading images:', err);
     res.status(500).send('Database error: ' + err.message);
+  }
+});
+
+// GIF Creator page
+app.get('/gif', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT filename FROM images ORDER BY created_at DESC'
+    );
+    const images = result.rows;
+    const sourceImage = req.query.source || '';
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GIF Creator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>${commonStyles}
+    .preview-container {
+      background: #1a1a1a;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #333;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .preview-container img {
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: 8px;
+    }
+    #preview { display: ${sourceImage ? 'block' : 'none'}; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">📷 Upload</a>
+    <a href="/gif">🎬 GIF Creator</a>
+  </div>
+  
+  <h1>🎬 GIF Creator</h1>
+  <p style="color:#888">Create a GIF that shows an image for X seconds, then disappears. Plays only once.</p>
+  
+  <div class="gif-form">
+    <form action="/create-gif" method="post" enctype="multipart/form-data">
+      
+      <label>Use Existing Image</label>
+      <select name="existingImage" id="existingImage" onchange="updatePreview()">
+        <option value="">-- Or upload new below --</option>
+        ${images.map(img => `<option value="${img.filename}" ${img.filename === sourceImage ? 'selected' : ''}>${img.filename}</option>`).join('')}
+      </select>
+      
+      <div id="preview" class="preview-container">
+        <img id="previewImg" src="${sourceImage ? '/' + sourceImage : ''}" alt="Preview">
+      </div>
+      
+      <label>Or Upload New Image</label>
+      <input type="file" name="image" accept="image/*">
+      
+      <label>Show Duration (seconds)</label>
+      <input type="number" name="duration" value="3" min="0.5" max="30" step="0.5" required>
+      <p class="hint">How long the image stays visible before disappearing</p>
+      
+      <label>Output Filename</label>
+      <input type="text" name="outputName" placeholder="my-animation" required>
+      
+      <label>Resize (optional)</label>
+      <div class="row">
+        <div>
+          <input type="number" name="width" placeholder="Width (px)" min="1" max="1000">
+        </div>
+        <div>
+          <input type="number" name="height" placeholder="Height (px)" min="1" max="1000">
+        </div>
+      </div>
+      <p class="hint">Leave empty to use original size (max 1000px recommended for GIFs)</p>
+      
+      <button type="submit" style="margin-top:20px">Create GIF</button>
+    </form>
+  </div>
+  
+  <script>
+    function updatePreview() {
+      const select = document.getElementById('existingImage');
+      const preview = document.getElementById('preview');
+      const previewImg = document.getElementById('previewImg');
+      
+      if (select.value) {
+        previewImg.src = '/' + select.value + '?t=' + Date.now();
+        preview.style.display = 'block';
+      } else {
+        preview.style.display = 'none';
+      }
+    }
+  </script>
+</body>
+</html>
+    `);
+  } catch (err) {
+    console.error('Error loading GIF page:', err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Create GIF endpoint
+app.post('/create-gif', upload.single('image'), async (req, res) => {
+  try {
+    let imageBuffer;
+    
+    // Get image from existing or uploaded
+    if (req.body.existingImage) {
+      const result = await pool.query(
+        'SELECT data FROM images WHERE filename = $1',
+        [req.body.existingImage]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).send('Source image not found');
+      }
+      imageBuffer = result.rows[0].data;
+    } else if (req.file) {
+      imageBuffer = req.file.buffer;
+    } else {
+      return res.status(400).send('No image provided');
+    }
+
+    const duration = parseFloat(req.body.duration) || 3;
+    const outputName = req.body.outputName || 'animation';
+    const targetWidth = req.body.width ? parseInt(req.body.width) : null;
+    const targetHeight = req.body.height ? parseInt(req.body.height) : null;
+
+    // Process image with sharp to get raw pixel data
+    let sharpInstance = sharp(imageBuffer);
+    
+    // Get original dimensions
+    const metadata = await sharpInstance.metadata();
+    let width = metadata.width;
+    let height = metadata.height;
+
+    // Resize if specified
+    if (targetWidth || targetHeight) {
+      sharpInstance = sharpInstance.resize(targetWidth, targetHeight, {
+        fit: 'inside',
+        withoutEnlargement: true
+      });
+      const resizedMeta = await sharpInstance.toBuffer().then(buf => sharp(buf).metadata());
+      width = resizedMeta.width;
+      height = resizedMeta.height;
+    }
+
+    // Limit size for GIF performance
+    if (width > 1000 || height > 1000) {
+      const scale = Math.min(1000 / width, 1000 / height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      sharpInstance = sharp(imageBuffer).resize(width, height);
+    }
+
+    // Get raw RGBA data
+    const rawBuffer = await sharpInstance
+      .ensureAlpha()
+      .raw()
+      .toBuffer();
+
+    // Create GIF encoder
+    const encoder = new GIFEncoder(width, height, 'neuquant', true); // true = use global palette
+    encoder.setRepeat(-1); // -1 = no repeat (play once)
+    encoder.setDelay(duration * 1000); // delay in ms
+    encoder.setQuality(10);
+    encoder.setTransparent(0x000000);
+
+    // Start encoding
+    encoder.start();
+
+    // Create canvas for the image frame
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Draw the image frame
+    const imageData = ctx.createImageData(width, height);
+    imageData.data.set(rawBuffer);
+    ctx.putImageData(imageData, 0, 0);
+    encoder.addFrame(ctx);
+
+    // Create transparent/empty frame
+    ctx.clearRect(0, 0, width, height);
+    encoder.setDelay(100); // Short delay for final frame
+    encoder.addFrame(ctx);
+
+    // Finish encoding
+    encoder.finish();
+
+    // Get the GIF buffer
+    const gifBuffer = encoder.out.getData();
+
+    // Save to database
+    const filename = outputName + '.gif';
+    await pool.query(
+      `INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3)
+       ON CONFLICT (filename) DO UPDATE SET mimetype = $2, data = $3`,
+      [filename, 'image/gif', gifBuffer]
+    );
+
+    const imageUrl = `${req.protocol}://${req.get('host')}/${filename}`;
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GIF Created</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      max-width: 600px; 
+      margin: 50px auto; 
+      padding: 20px;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      text-align: center;
+    }
+    .success-box {
+      background: #1a3a2a;
+      border: 2px solid #4ecdc4;
+      padding: 30px;
+      border-radius: 12px;
+    }
+    h1 { color: #4ecdc4; }
+    img { max-width: 100%; max-height: 300px; border-radius: 8px; margin: 20px 0; background: #333; }
+    .url {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: monospace;
+      word-break: break-all;
+      color: #4ecdc4;
+      margin: 20px 0;
+    }
+    a { color: #4ecdc4; }
+    button {
+      background: #4ecdc4;
+      color: #000;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      margin: 10px;
+    }
+    .info {
+      color: #888;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    .reload-btn {
+      background: #555;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="success-box">
+    <h1>🎬 GIF Created!</h1>
+    <p class="info">${width}×${height}px • Shows for ${duration}s then disappears • Plays once</p>
+    <img id="gifPreview" src="/${filename}?t=${Date.now()}" alt="Created GIF">
+    <button class="reload-btn" onclick="replayGif()">▶ Replay GIF</button>
+    <div class="url" id="imageUrl">${imageUrl}</div>
+    <button onclick="navigator.clipboard.writeText('${imageUrl}')">Copy URL</button>
+    <br><br>
+    <a href="/gif">← Create another</a> | <a href="/">← Back to gallery</a>
+  </div>
+  <script>
+    function replayGif() {
+      const img = document.getElementById('gifPreview');
+      img.src = '/${filename}?t=' + Date.now();
+    }
+  </script>
+</body>
+</html>
+    `);
+  } catch (err) {
+    console.error('Error creating GIF:', err);
+    res.status(500).send('Error creating GIF: ' + err.message);
   }
 });
 
