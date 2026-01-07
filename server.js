@@ -629,8 +629,15 @@ app.get('/editor', async (req, res) => {
       'SELECT filename FROM images ORDER BY created_at DESC'
     );
     const images = result.rows;
+    
+    const linksResult = await pool.query(
+      'SELECT slug, image_filename FROM static_links ORDER BY created_at DESC'
+    );
+    const staticLinks = linksResult.rows;
+    
     const sourceImage = req.query.source || '';
     const imageOptions = images.map(img => '<option value="' + img.filename + '">' + img.filename + '</option>').join('');
+    const linkOptions = staticLinks.map(link => '<option value="' + link.slug + '">/' + link.slug + (link.image_filename ? ' → ' + link.image_filename : ' (empty)') + '</option>').join('');
 
     res.send(`
 <!DOCTYPE html>
@@ -828,7 +835,7 @@ app.get('/editor', async (req, res) => {
       </div>
       
       <div class="section">
-        <h3>Save</h3>
+        <h3>Save as New Image</h3>
         <input type="text" id="outputName" placeholder="proto-image">
         <button onclick="saveImage()">💾 Save as PNG</button>
         <button class="btn-gif" onclick="saveAsGif()">🎬 Save as GIF</button>
@@ -837,6 +844,14 @@ app.get('/editor', async (req, res) => {
           <input type="number" id="gifDuration" value="3" min="0.5" max="30" step="0.5">
           <button class="btn-gif" onclick="doSaveGif()">✓ Create GIF</button>
         </div>
+        
+        <h3 style="margin-top:15px;">Update Static Link</h3>
+        <select id="staticLinkSelect">
+          <option value="">-- Select static link --</option>
+          ${linkOptions}
+        </select>
+        <button class="btn-secondary" onclick="saveToStaticLink()">🔗 Update as PNG</button>
+        <button class="btn-gif" onclick="saveToStaticLinkGif()">🔗 Update as GIF</button>
       </div>
       
       <p class="info">Click layer to select. Drag to move. Scroll to resize.</p>
@@ -1175,6 +1190,56 @@ app.get('/editor', async (req, res) => {
       }
     }
     
+    async function saveToStaticLink() {
+      const slug = document.getElementById('staticLinkSelect').value;
+      if (!slug) { alert('Please select a static link'); return; }
+      
+      const oldSelected = selectedIndex;
+      selectedIndex = -1;
+      draw();
+      const dataUrl = canvas.toDataURL('image/png');
+      selectedIndex = oldSelected;
+      draw();
+      
+      const response = await fetch('/save-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageData: dataUrl, filename: slug + '.png', mimetype: 'image/png', updateStaticLink: slug })
+      });
+      const result = await response.json();
+      if (result.success) {
+        alert('Static link /' + slug + ' updated!\\nURL: ' + result.url);
+      } else {
+        alert('Error: ' + result.error);
+      }
+    }
+    
+    async function saveToStaticLinkGif() {
+      const slug = document.getElementById('staticLinkSelect').value;
+      if (!slug) { alert('Please select a static link'); return; }
+      const duration = prompt('Show duration in seconds:', '3');
+      if (!duration) return;
+      
+      const oldSelected = selectedIndex;
+      selectedIndex = -1;
+      draw();
+      const dataUrl = canvas.toDataURL('image/png');
+      selectedIndex = oldSelected;
+      draw();
+      
+      const response = await fetch('/save-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageData: dataUrl, filename: slug + '.gif', mimetype: 'image/gif', createGif: true, duration: parseFloat(duration), updateStaticLink: slug })
+      });
+      const result = await response.json();
+      if (result.success) {
+        alert('Static link /' + slug + ' updated with GIF!\\nURL: ' + result.url);
+      } else {
+        alert('Error: ' + result.error);
+      }
+    }
+    
     updateCanvasDisplay();
     window.addEventListener('resize', updateCanvasDisplay);
     ${sourceImage ? "document.getElementById('imageSelect').value = '" + sourceImage + "'; addLayer();" : ''}
@@ -1191,7 +1256,7 @@ app.get('/editor', async (req, res) => {
 // Save editor output
 app.post('/save-editor', async (req, res) => {
   try {
-    const { imageData, filename, mimetype, createGif, duration } = req.body;
+    const { imageData, filename, mimetype, createGif, duration, updateStaticLink } = req.body;
     
     // Convert base64 to buffer
     const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
@@ -1241,9 +1306,19 @@ app.post('/save-editor', async (req, res) => {
       [finalFilename, finalMimetype, buffer]
     );
     
+    // If updating a static link, point it to this new image
+    let responseUrl = req.protocol + '://' + req.get('host') + '/' + finalFilename;
+    if (updateStaticLink) {
+      await pool.query(
+        'UPDATE static_links SET image_filename = $1 WHERE slug = $2',
+        [finalFilename, updateStaticLink]
+      );
+      responseUrl = req.protocol + '://' + req.get('host') + '/' + updateStaticLink;
+    }
+    
     res.json({ 
       success: true, 
-      url: req.protocol + '://' + req.get('host') + '/' + finalFilename
+      url: responseUrl
     });
   } catch (err) {
     console.error('Error saving editor image:', err);
